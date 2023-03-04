@@ -11,72 +11,71 @@ import (
 )
 
 func Untar(source string, destination string) error {
-	var result error
-	var tarFile *os.File
+	tarFile, result := os.Open(source)
 
-	if tarFile, result = os.Open(source); result == nil {
-		defer tarFile.Close()
+	if result != nil {
+		return result
+	}
 
-		if !DirExists(destination) {
-			if err := os.MkdirAll(destination, os.ModeDir); err != nil {
+	defer tarFile.Close()
+
+	if !DirExists(destination) {
+		if err := os.MkdirAll(destination, os.ModeDir); err != nil {
+			return err
+		}
+	}
+
+	gzipReader, result := gzip.NewReader(tarFile)
+
+	if result != nil {
+		return result
+	}
+
+	defer gzipReader.Close()
+
+	tarReader := tar.NewReader(gzipReader)
+	fileSize, result := getZipFileSize(source)
+
+	if result != nil {
+		return result
+	}
+
+	counter := progressbar.NewWriteCounter(fileSize, "Unpacking")
+
+	for {
+		header, result := tarReader.Next()
+
+		if result != nil {
+			if result == io.EOF {
+				return nil // Discard useless error
+			}
+
+			return result
+		}
+
+		fullPath := path.Join(destination, header.Name)
+
+		if header.Typeflag == tar.TypeDir && !DirExists(fullPath) {
+			if err := os.MkdirAll(fullPath, os.ModeDir); err != nil {
 				return err
 			}
 		}
 
-		gzipReader, result := gzip.NewReader(tarFile)
+		if header.Typeflag == tar.TypeReg {
+			var teeReader io.Reader = io.TeeReader(tarReader, counter)
+			var outFile *os.File
 
-		if result != nil {
-			return result
-		}
-
-		defer gzipReader.Close()
-
-		tarReader := tar.NewReader(gzipReader)
-		fileSize, result := getZipFileSize(source)
-
-		if result != nil {
-			return result
-		}
-
-		counter := progressbar.NewWriteCounter(fileSize, "Unpacking")
-
-		for {
-			header, result := tarReader.Next()
-
-			if result != nil {
-				if result == io.EOF {
-					return nil // Discard useless error
-				}
-
+			if outFile, result = os.Create(fullPath); result != nil {
 				return result
 			}
 
-			fullPath := path.Join(destination, header.Name)
-
-			if header.Typeflag == tar.TypeDir {
-				if result = os.Mkdir(fullPath, os.ModeDir); result != nil {
-					break
-				}
+			if _, result = io.Copy(outFile, teeReader); result != nil {
+				return result
 			}
 
-			if header.Typeflag == tar.TypeReg {
-				var teeReader io.Reader = io.TeeReader(tarReader, counter)
-				var outFile *os.File
-
-				if outFile, result = os.Create(fullPath); result != nil {
-					return result
-				}
-
-				if _, result = io.Copy(outFile, teeReader); result != nil {
-					return result
-				}
-
-				outFile.Close()
-			}
+			outFile.Close()
 		}
 	}
-
-	return nil
 }
 
 func UntarSilent(source string, destination string) error {
