@@ -18,55 +18,61 @@ func Untar(source string, destination string) error {
 	if tarFile, result = os.Open(source); result == nil {
 		defer tarFile.Close()
 
-		if result = os.MkdirAll(destination, os.ModeDir); result == nil {
+		if !DirExists(destination) {
+			if err := os.MkdirAll(destination, os.ModeDir); err != nil {
+				return err
+			}
+		}
 
-			var gzipReader *gzip.Reader
-			if gzipReader, result = gzip.NewReader(tarFile); result == nil {
-				defer gzipReader.Close()
+		gzipReader, result := gzip.NewReader(tarFile)
 
-				tarReader := tar.NewReader(gzipReader)
-				var fileSize int64
+		if result != nil {
+			return result
+		}
 
-				if fileSize, result = getZipFileSize(source); result == nil {
-					counter := progressbar.NewWriteCounter(fileSize, "Unpacking")
-					var header *tar.Header
+		defer gzipReader.Close()
 
-					for {
-						if header, result = tarReader.Next(); result != nil {
-							if result == io.EOF {
-								result = nil // Discard useless error
-							}
+		tarReader := tar.NewReader(gzipReader)
+		var fileSize int64
 
-							break
-						}
+		if fileSize, result = getZipFileSize(source); result == nil {
+			counter := progressbar.NewWriteCounter(fileSize, "Unpacking")
+			var header *tar.Header
 
-						fullPath := path.Join(destination, header.Name)
-
-						if header.Typeflag == tar.TypeDir {
-							if result = os.Mkdir(fullPath, os.ModeDir); result != nil {
-								break
-							}
-						}
-
-						if header.Typeflag == tar.TypeReg {
-							var teeReader io.Reader = io.TeeReader(tarReader, counter)
-							var outFile *os.File
-
-							if outFile, result = os.Create(fullPath); result != nil {
-								break
-							}
-
-							if _, result = io.Copy(outFile, teeReader); result != nil {
-								break
-							}
-
-							outFile.Close()
-						}
+			for {
+				if header, result = tarReader.Next(); result != nil {
+					if result == io.EOF {
+						result = nil // Discard useless error
 					}
 
-					fmt.Println("") // TODO :: Fix progress bar new line bug
+					break
+				}
+
+				fullPath := path.Join(destination, header.Name)
+
+				if header.Typeflag == tar.TypeDir {
+					if result = os.Mkdir(fullPath, os.ModeDir); result != nil {
+						break
+					}
+				}
+
+				if header.Typeflag == tar.TypeReg {
+					var teeReader io.Reader = io.TeeReader(tarReader, counter)
+					var outFile *os.File
+
+					if outFile, result = os.Create(fullPath); result != nil {
+						break
+					}
+
+					if _, result = io.Copy(outFile, teeReader); result != nil {
+						break
+					}
+
+					outFile.Close()
 				}
 			}
+
+			fmt.Println("") // TODO :: Fix progress bar new line bug
 		}
 	}
 
