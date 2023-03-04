@@ -153,33 +153,38 @@ func UnzipSilent(source string, destination string) ([]string, error) {
 }
 
 func getZipFileSize(fullFilePath string) (int64, error) {
-	var result error
 	var fileSize int64
+	file, result := os.Open(fullFilePath)
 
-	var file *os.File
-	if file, result = os.Open(fullFilePath); result == nil {
-
-		var gzipReader *gzip.Reader
-		if gzipReader, result = gzip.NewReader(file); result == nil {
-
-			tarReader := tar.NewReader(gzipReader)
-			var header *tar.Header
-
-			for {
-				header, result = tarReader.Next()
-
-				if result != nil {
-					if result == io.EOF {
-						result = nil // Discard useless error
-					}
-
-					break
-				} else if header.Typeflag == tar.TypeReg {
-					fileSize += header.Size
-				}
-			}
-		}
+	if result != nil {
+		return fileSize, result
 	}
 
-	return fileSize, result
+	defer file.Close()
+
+	gzipReader, result := gzip.NewReader(file)
+
+	if result != nil {
+		return fileSize, result
+	}
+
+	defer gzipReader.Close()
+
+	tarReader := tar.NewReader(gzipReader)
+
+	for {
+		header, result := tarReader.Next()
+
+		if result != nil {
+			if result == io.EOF {
+				return fileSize, nil // Discard useless error
+			}
+
+			return fileSize, result
+		}
+
+		if header.Typeflag == tar.TypeReg {
+			fileSize += header.Size
+		}
+	}
 }
