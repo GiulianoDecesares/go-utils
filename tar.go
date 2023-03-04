@@ -3,7 +3,6 @@ package utils
 import (
 	"archive/tar"
 	"compress/gzip"
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -33,50 +32,51 @@ func Untar(source string, destination string) error {
 		defer gzipReader.Close()
 
 		tarReader := tar.NewReader(gzipReader)
-		var fileSize int64
+		fileSize, result := getZipFileSize(source)
 
-		if fileSize, result = getZipFileSize(source); result == nil {
-			counter := progressbar.NewWriteCounter(fileSize, "Unpacking")
-			var header *tar.Header
+		if result != nil {
+			return result
+		}
 
-			for {
-				if header, result = tarReader.Next(); result != nil {
-					if result == io.EOF {
-						result = nil // Discard useless error
-					}
+		counter := progressbar.NewWriteCounter(fileSize, "Unpacking")
 
+		for {
+			header, result := tarReader.Next()
+
+			if result != nil {
+				if result == io.EOF {
+					return nil // Discard useless error
+				}
+
+				return result
+			}
+
+			fullPath := path.Join(destination, header.Name)
+
+			if header.Typeflag == tar.TypeDir {
+				if result = os.Mkdir(fullPath, os.ModeDir); result != nil {
 					break
-				}
-
-				fullPath := path.Join(destination, header.Name)
-
-				if header.Typeflag == tar.TypeDir {
-					if result = os.Mkdir(fullPath, os.ModeDir); result != nil {
-						break
-					}
-				}
-
-				if header.Typeflag == tar.TypeReg {
-					var teeReader io.Reader = io.TeeReader(tarReader, counter)
-					var outFile *os.File
-
-					if outFile, result = os.Create(fullPath); result != nil {
-						break
-					}
-
-					if _, result = io.Copy(outFile, teeReader); result != nil {
-						break
-					}
-
-					outFile.Close()
 				}
 			}
 
-			fmt.Println("") // TODO :: Fix progress bar new line bug
+			if header.Typeflag == tar.TypeReg {
+				var teeReader io.Reader = io.TeeReader(tarReader, counter)
+				var outFile *os.File
+
+				if outFile, result = os.Create(fullPath); result != nil {
+					return result
+				}
+
+				if _, result = io.Copy(outFile, teeReader); result != nil {
+					return result
+				}
+
+				outFile.Close()
+			}
 		}
 	}
 
-	return result
+	return nil
 }
 
 func UntarSilent(source string, destination string) error {
